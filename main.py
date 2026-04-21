@@ -1,4 +1,4 @@
-﻿import customtkinter as ctk
+import customtkinter as ctk
 import serial
 import serial.tools.list_ports
 import threading
@@ -30,15 +30,17 @@ class Serial2RadarApp(ctk.CTk):
         
         # Radar Data
         self.current_angle = 90
-        self.max_distance = 50  # Max distance in cm to display on radar
-        self.blips = []         # Stores [x, y, life] for detected objects
+        self.max_distance = 50  # Max distance in cm. Objects further than this won't show.
+        self.blips = []         
 
         self.build_ui()
-        self.update_radar_ui()  # Start the animation loop
+        
+        # Give the UI 100ms to physically render on screen before starting the animation loop
+        self.after(100, self.update_radar_ui)  
 
     def build_ui(self):
         # ==========================================
-        # LEFT SIDEBAR: Connection & Settings
+        # LEFT SIDEBAR
         # ==========================================
         self.sidebar = ctk.CTkFrame(self, width=220, corner_radius=0)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
@@ -68,7 +70,6 @@ class Serial2RadarApp(ctk.CTk):
         self.status_label = ctk.CTkLabel(self.status_frame, text="Disconnected", font=("Segoe UI", 13))
         self.status_label.pack(side="left")
 
-        # GitHub Button
         self.github_btn = ctk.CTkButton(self.sidebar, text="GitHub @bukanluq", 
                                         command=self.open_github, fg_color="#333333", hover_color="#555555")
         self.github_btn.grid(row=7, column=0, padx=20, pady=20, sticky="s")
@@ -84,14 +85,13 @@ class Serial2RadarApp(ctk.CTk):
         self.data_label = ctk.CTkLabel(self.main_panel, text="Angle: -- | Distance: -- cm", font=("Consolas", 18, "bold"), text_color="#4CAF50")
         self.data_label.grid(row=0, column=0, pady=(0, 10))
 
-        # Using standard tkinter Canvas for high-performance drawing
         self.canvas_width = 600
         self.canvas_height = 300
         self.canvas = tk.Canvas(self.main_panel, width=self.canvas_width, height=self.canvas_height, bg="black", highlightthickness=2, highlightbackground="#333333")
         self.canvas.grid(row=1, column=0, sticky="nsew")
 
-        # Handle window resizing
-        self.main_panel.bind("<Configure>", self.on_resize)
+        # FIX: Bind directly to the canvas instead of the panel
+        self.canvas.bind("<Configure>", self.on_resize)
 
     def get_ports(self):
         ports = serial.tools.list_ports.comports()
@@ -101,16 +101,20 @@ class Serial2RadarApp(ctk.CTk):
         webbrowser.open("https://github.com/bukanluq")
 
     def on_resize(self, event):
-        # Update canvas dimensions when window resizes
-        self.canvas_width = self.canvas.winfo_width()
-        self.canvas_height = self.canvas.winfo_height()
-        self.draw_radar_background()
+        # FIX: Safety check. Only resize if the window has actually rendered to a normal size
+        if event.width > 50 and event.height > 50:
+            self.canvas_width = event.width
+            self.canvas_height = event.height
+            self.draw_radar_background()
 
     def draw_radar_background(self):
         self.canvas.delete("grid")
         cx = self.canvas_width / 2
         cy = self.canvas_height - 10
         radius = min(self.canvas_width / 2, self.canvas_height) - 20
+
+        # Safety check to prevent negative radius crashes
+        if radius <= 0: return
 
         # Draw semi-circles
         for i in range(1, 4):
@@ -125,37 +129,31 @@ class Serial2RadarApp(ctk.CTk):
             self.canvas.create_line(cx, cy, x, y, fill="#1B5E20", tags="grid")
 
     def update_radar_ui(self):
-        # This function loops to redraw dynamic elements (sweep arm and blips)
         self.canvas.delete("dynamic")
 
         cx = self.canvas_width / 2
         cy = self.canvas_height - 10
         radius = min(self.canvas_width / 2, self.canvas_height) - 20
 
-        # Draw Sweep Arm
-        rad = math.radians(self.current_angle)
-        arm_x = cx + (radius * math.cos(rad))
-        arm_y = cy - (radius * math.sin(rad))
-        self.canvas.create_line(cx, cy, arm_x, arm_y, fill="#4CAF50", width=3, tags="dynamic")
+        if radius > 0:
+            # Draw Sweep Arm
+            rad = math.radians(self.current_angle)
+            arm_x = cx + (radius * math.cos(rad))
+            arm_y = cy - (radius * math.sin(rad))
+            self.canvas.create_line(cx, cy, arm_x, arm_y, fill="#4CAF50", width=3, tags="dynamic")
 
-        # Draw Blips (and fade them)
-        alive_blips = []
-        for blip in self.blips:
-            x, y, life = blip
-            if life > 0:
-                # Convert life (0-255) to a hex color from red to dark red
-                color_hex = f"#{int(life):02x}0000"
-                
-                # Draw the blip
-                self.canvas.create_oval(x-4, y-4, x+4, y+4, fill=color_hex, outline="", tags="dynamic")
-                
-                # Decrease life to simulate fading
-                blip[2] -= 5 
-                alive_blips.append(blip)
+            # Draw Blips
+            alive_blips = []
+            for blip in self.blips:
+                x, y, life = blip
+                if life > 0:
+                    color_hex = f"#{int(life):02x}0000"
+                    self.canvas.create_oval(x-5, y-5, x+5, y+5, fill=color_hex, outline="", tags="dynamic")
+                    blip[2] -= 4 # Fade speed
+                    alive_blips.append(blip)
 
-        self.blips = alive_blips # Keep only blips that haven't faded entirely
-
-        # Call this function again after 30ms (~30 FPS)
+            self.blips = alive_blips
+            
         self.after(30, self.update_radar_ui)
 
     def toggle_listening(self):
@@ -183,56 +181,53 @@ class Serial2RadarApp(ctk.CTk):
         self.toggle_btn.configure(text="START RADAR", fg_color="#2E7D32", hover_color="#1B5E20")
         self.port_dropdown.configure(state="normal")
         self.baud_dropdown.configure(state="normal")
-        
         self.status_dot.configure(text_color="gray")
         self.status_label.configure(text="Disconnected")
-        self.port_dropdown.configure(values=self.get_ports())
 
     def serial_loop(self, port, baud):
         try:
             self.serial_conn = serial.Serial(port, int(baud), timeout=0.1) 
-            self.status_dot.configure(text_color="#4CAF50")
-            self.status_label.configure(text=f"Active on {port}")
+            self.after(0, lambda: self.status_dot.configure(text_color="#4CAF50"))
+            self.after(0, lambda: self.status_label.configure(text=f"Active on {port}"))
         except Exception as e:
-            self.status_dot.configure(text_color="#FF5252")
-            self.status_label.configure(text="Port Error / In Use")
-            self.stop_listening()
+            self.after(0, lambda: self.status_dot.configure(text_color="#FF5252"))
+            self.after(0, lambda: self.status_label.configure(text="Port Error"))
+            self.after(0, self.stop_listening)
             return
 
         while self.is_running:
             try:
                 if self.serial_conn.in_waiting > 0:
-                    data = self.serial_conn.readline().decode('utf-8').strip()
+                    raw_data = self.serial_conn.readline().decode('utf-8', errors='ignore').strip()
                     
-                    # Expecting format: "Angle,Distance" (e.g., "90,15")
-                    if "," in data:
-                        parts = data.split(",")
-                        if len(parts) == 2:
+                    if "," in raw_data:
+                        parts = raw_data.split(",")
+                        
+                        if len(parts) == 2 and parts[0].lstrip('-').isdigit() and parts[1].lstrip('-').isdigit():
                             angle = int(parts[0])
                             distance = int(parts[1])
                             
                             self.current_angle = angle
                             
-                            # Update Text UI safely from thread
-                            self.data_label.configure(text=f"Angle: {angle:03d}° | Distance: {distance:03d} cm")
+                            self.after(0, lambda a=angle, d=distance: self.data_label.configure(
+                                text=f"Angle: {a:03d}° | Distance: {d:03d} cm"
+                            ))
 
-                            # Add a blip if object is detected within range
                             if 0 < distance <= self.max_distance:
                                 cx = self.canvas_width / 2
                                 cy = self.canvas_height - 10
                                 radius = min(self.canvas_width / 2, self.canvas_height) - 20
                                 
-                                # Math to calculate pixel position
-                                rad = math.radians(angle)
-                                scaled_dist = (distance / self.max_distance) * radius
-                                
-                                target_x = cx + (scaled_dist * math.cos(rad))
-                                target_y = cy - (scaled_dist * math.sin(rad))
-                                
-                                # Add to blips list [x, y, life]
-                                self.blips.append([target_x, target_y, 255])
+                                if radius > 0:
+                                    rad = math.radians(angle)
+                                    scaled_dist = (distance / self.max_distance) * radius
+                                    
+                                    target_x = cx + (scaled_dist * math.cos(rad))
+                                    target_y = cy - (scaled_dist * math.sin(rad))
+                                    
+                                    self.blips.append([target_x, target_y, 255])
 
-            except Exception:
+            except Exception as e:
                 pass
             
             time.sleep(0.01)
