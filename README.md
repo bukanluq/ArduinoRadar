@@ -10,8 +10,8 @@ Make sure the following are installed before starting
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/bukanluq/Serial2Radar.git
-cd Serial2Radar
+git clone https://github.com/bukanluq/ArduinoRadar.git
+cd ArduinoRadar
 ````
 
 ### 2. Create a virtual environment
