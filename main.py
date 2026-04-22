@@ -500,17 +500,38 @@ class RadarVisualizerFrame(ctk.CTkFrame):
                                     else:
                                         threat_color = "#00E5FF" 
                                     
-                                    # Added raw_dist to pass actual numbers to the HUD
-                                    self.blips.append({
-                                        "angle": angle,
-                                        "raw_dist": distance,
-                                        "dist_px": scaled_dist,
-                                        "x": target_x, 
-                                        "y": target_y, 
-                                        "size": 8.0, 
-                                        "color": threat_color,
-                                        "ripple_radius": 0.0
-                                    })
+                                    # --- TARGET CLUSTERING LOGIC ---
+                                    is_new_target = True
+                                    for blip in self.blips:
+                                        # If reading is within 4 degrees and 4 cm of an existing target
+                                        if abs(blip["angle"] - angle) <= 4 and abs(blip["raw_dist"] - distance) <= 4:
+                                            # Refresh the existing target
+                                            blip["angle"] = angle
+                                            blip["raw_dist"] = distance
+                                            blip["dist_px"] = scaled_dist
+                                            blip["x"] = target_x
+                                            blip["y"] = target_y
+                                            blip["size"] = 8.0 
+                                            blip["color"] = threat_color
+                                            
+                                            # Only trigger a new ripple if the old one has expanded enough
+                                            if blip["ripple_radius"] > 30: 
+                                                blip["ripple_radius"] = 0.0 
+                                                
+                                            is_new_target = False
+                                            break
+
+                                    if is_new_target:
+                                        self.blips.append({
+                                            "angle": angle,
+                                            "raw_dist": distance,
+                                            "dist_px": scaled_dist,
+                                            "x": target_x, 
+                                            "y": target_y, 
+                                            "size": 8.0, 
+                                            "color": threat_color,
+                                            "ripple_radius": 0.0
+                                        })
             except Exception:
                 pass
             time.sleep(0.01)
