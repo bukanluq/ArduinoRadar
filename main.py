@@ -247,9 +247,10 @@ class RadarVisualizerFrame(ctk.CTkFrame):
         
         # Radar Tracking Data
         self.current_angle = 90
-        self.sweep_direction = 1 # 1 for right, -1 for left
-        self.max_distance = 100  # Default to 100cm
-        self.blips = []         
+        self.sweep_direction = 1 
+        self.max_distance = 100  
+        self.blips = []
+        self.closest_target = None         
 
         self.build_ui()
         self.after(100, self.update_radar_ui)  
@@ -291,19 +292,19 @@ class RadarVisualizerFrame(ctk.CTkFrame):
         self.data_label.pack(side="right", padx=20)
 
         # --- Main Canvas Area ---
-        self.canvas_frame = ctk.CTkFrame(self, corner_radius=10)
+        self.canvas_frame = ctk.CTkFrame(self, corner_radius=10, border_width=2, border_color="#1E1E1E")
         self.canvas_frame.pack(fill="both", expand=True)
 
         self.canvas_width = 800
         self.canvas_height = 400
-        self.canvas = tk.Canvas(self.canvas_frame, bg="#0A0F0D", highlightthickness=0) # Darker, radar-like background
-        self.canvas.pack(fill="both", expand=True, padx=10, pady=10)
+        self.canvas = tk.Canvas(self.canvas_frame, bg="#0A0F0D", highlightthickness=0) 
+        self.canvas.pack(fill="both", expand=True, padx=5, pady=5)
         self.canvas.bind("<Configure>", self.on_resize)
 
     def update_range(self, val):
         self.max_distance = int(val)
         self.range_val_label.configure(text=f"{self.max_distance} cm")
-        self.draw_radar_background() # Redraw the grid to update the text labels
+        self.draw_radar_background() 
 
     def on_resize(self, event):
         if event.width > 50 and event.height > 50:
@@ -324,7 +325,6 @@ class RadarVisualizerFrame(ctk.CTkFrame):
             r = radius * (i / 3)
             self.canvas.create_arc(cx - r, cy - r, cx + r, cy + r, start=0, extent=180, style=tk.ARC, outline="#1E5128", dash=(4, 4), tags="grid")
             
-            # Distance labels along the vertical axis
             dist_val = int(self.max_distance * (i / 3))
             self.canvas.create_text(cx + 8, cy - r, text=f"{dist_val}cm", fill="#4CAF50", font=("Consolas", 10, "bold"), anchor="w", tags="grid")
 
@@ -342,40 +342,82 @@ class RadarVisualizerFrame(ctk.CTkFrame):
         radius = min(self.canvas_width / 2, self.canvas_height) - 20
 
         if radius > 0:
-            # 1. Draw Fading Sweep Trail
+            # 1. Draw Solid Fading Sweep Trail (Pie Slices)
             trail_colors = ["#2ECC71", "#229954", "#196F3D", "#114A29", "#0A2F1A"]
             for i in range(5):
                 trail_ang = self.current_angle - (i * 3 * self.sweep_direction)
                 if 0 <= trail_ang <= 180:
-                    rad = math.radians(trail_ang)
-                    arm_x = cx + (radius * math.cos(rad))
-                    arm_y = cy - (radius * math.sin(rad))
-                    self.canvas.create_line(cx, cy, arm_x, arm_y, fill=trail_colors[i], width=3 - (i*0.5), tags="dynamic")
+                    self.canvas.create_arc(cx - radius, cy - radius, cx + radius, cy + radius,
+                                           start=trail_ang, extent=(3 * self.sweep_direction),
+                                           style=tk.PIESLICE, fill=trail_colors[i], outline="", tags="dynamic")
 
-            # 2. Draw Main Sweep Arm
-            main_rad = math.radians(self.current_angle)
-            arm_x = cx + (radius * math.cos(main_rad))
-            arm_y = cy - (radius * math.sin(main_rad))
-            self.canvas.create_line(cx, cy, arm_x, arm_y, fill="#00FF66", width=3, tags="dynamic")
-
-            # 3. Process and Draw Blips (Shrinking effect for persistence)
+            # 2. Process and Draw Advanced Blips
             alive_blips = []
+            beam_width = 15 
+            closest_dist = self.max_distance + 1
+            has_critical_threat = False
+
             for blip in self.blips:
                 if blip["size"] > 0:
-                    x, y, size, color = blip["x"], blip["y"], blip["size"], blip["color"]
+                    a, raw_dist, d_px = blip["angle"], blip["raw_dist"], blip["dist_px"]
+                    x, y, size = blip["x"], blip["y"], blip["size"]
+                    color, ripple = blip["color"], blip["ripple_radius"]
                     
-                    # Draw glowing aura
-                    self.canvas.create_oval(x - size, y - size, x + size, y + size, fill=color, outline="", tags="dynamic")
+                    # Track closest target for the HUD
+                    if raw_dist < closest_dist:
+                        closest_dist = raw_dist
+
+                    if color == "#FF3333": # Check if Red Zone
+                        has_critical_threat = True
+
+                    # A. Physical Object Arc
+                    self.canvas.create_arc(cx - d_px, cy - d_px, cx + d_px, cy + d_px,
+                                           start=a - (beam_width/2), extent=beam_width,
+                                           style=tk.ARC, outline=color, width=size * 1.5, tags="dynamic")
                     
-                    # Core bright dot
-                    if size > 4: 
-                        self.canvas.create_oval(x - 2, y - 2, x + 2, y + 2, fill="white", outline="", tags="dynamic")
+                    # B. Target Crosshair & Data Tag
+                    if size > 5:
+                        self.canvas.create_line(x - 8, y, x + 8, y, fill="white", width=1, tags="dynamic")
+                        self.canvas.create_line(x, y - 8, x, y + 8, fill="white", width=1, tags="dynamic")
+                        
+                        # Datatag (e.g. "TGT: 45cm")
+                        text_x = x + 15 if a > 90 else x - 15
+                        anchor_pos = "w" if a > 90 else "e"
+                        self.canvas.create_text(text_x, y - 10, text=f"{raw_dist}cm | {a}°", fill=color, 
+                                                font=("Consolas", 10, "bold"), anchor=anchor_pos, tags="dynamic")
+
+                    # C. Sonar Ripple
+                    if size > 6: 
+                        self.canvas.create_oval(x - ripple, y - ripple, x + ripple, y + ripple,
+                                                outline=color, width=1, tags="dynamic")
+                        blip["ripple_radius"] += 4 
                     
-                    blip["size"] -= 0.4 # Fade speed (Shrink over time)
+                    blip["size"] -= 0.2 # Fade speed (Slower for better clustering)
                     alive_blips.append(blip)
 
             self.blips = alive_blips
+
+            # 3. Dynamic Border Warning
+            if has_critical_threat:
+                self.canvas_frame.configure(border_color="#FF3333")
+            else:
+                self.canvas_frame.configure(border_color="#1E1E1E")
+
+            # 4. System Status HUD (Top Left Overlay)
+            hud_y = 20
+            self.canvas.create_text(20, hud_y, text=f"SYS STATUS: {'ACTIVE' if self.is_running else 'OFFLINE'}", 
+                                    fill="#2ECC71" if self.is_running else "gray", font=("Consolas", 12, "bold"), anchor="w", tags="dynamic")
+            self.canvas.create_text(20, hud_y + 20, text=f"TARGETS TRK: {len(self.blips)}", fill="white", font=("Consolas", 12), anchor="w", tags="dynamic")
             
+            closest_text = f"CLOSEST THREAT: {closest_dist}cm" if closest_dist <= self.max_distance else "CLOSEST THREAT: CLEAR"
+            threat_color = "#FF3333" if closest_dist < (self.max_distance * 0.33) else ("#FFD700" if closest_dist < (self.max_distance * 0.66) else "#00E5FF")
+            if closest_dist > self.max_distance: threat_color = "#2ECC71"
+
+            self.canvas.create_text(20, hud_y + 40, text=closest_text, fill=threat_color, font=("Consolas", 12, "bold"), anchor="w", tags="dynamic")
+
+            if has_critical_threat:
+                self.canvas.create_text(self.canvas_width/2, 30, text="[!] PROXIMITY ALERT [!]", fill="#FF3333", font=("Consolas", 16, "bold"), tags="dynamic")
+
         self.after(30, self.update_radar_ui)
 
     def toggle_listening(self):
@@ -392,7 +434,8 @@ class RadarVisualizerFrame(ctk.CTkFrame):
             self.toggle_btn.configure(text="■ STOP RADAR", fg_color="#C62828", hover_color="#B71C1C")
             self.port_dropdown.configure(state="disabled")
             self.baud_dropdown.configure(state="disabled")
-            self.range_slider.configure(state="disabled") # Lock range during sweep
+            self.range_slider.configure(state="disabled") 
+            self.blips = [] # Clear history on start
             
             self.thread = threading.Thread(target=self.serial_loop, args=(port, baud), daemon=True)
             self.thread.start()
@@ -407,6 +450,7 @@ class RadarVisualizerFrame(ctk.CTkFrame):
         self.range_slider.configure(state="normal")
         self.status_dot.configure(text_color="gray")
         self.status_label.configure(text="Offline")
+        self.canvas_frame.configure(border_color="#1E1E1E") # Reset border
 
     def serial_loop(self, port, baud):
         try:
@@ -429,7 +473,6 @@ class RadarVisualizerFrame(ctk.CTkFrame):
                             angle = int(parts[0])
                             distance = int(parts[1])
                             
-                            # Track Sweep Direction for the visual trail
                             if angle != self.current_angle:
                                 self.sweep_direction = 1 if angle > self.current_angle else -1
                             self.current_angle = angle
@@ -438,7 +481,6 @@ class RadarVisualizerFrame(ctk.CTkFrame):
                                 text=f"Angle: {a:03d}° | Dist: {d:03d} cm"
                             ))
 
-                            # Add Blip if an object is detected within selected max range
                             if 0 < distance <= self.max_distance:
                                 cx = self.canvas_width / 2
                                 cy = self.canvas_height - 10
@@ -450,21 +492,24 @@ class RadarVisualizerFrame(ctk.CTkFrame):
                                     target_x = cx + (scaled_dist * math.cos(rad))
                                     target_y = cy - (scaled_dist * math.sin(rad))
                                     
-                                    # Threat Level Coloring
                                     dist_pct = distance / self.max_distance
                                     if dist_pct < 0.33:
-                                        threat_color = "#FF3333" # Red (Close)
+                                        threat_color = "#FF3333" 
                                     elif dist_pct < 0.66:
-                                        threat_color = "#FFD700" # Yellow (Mid)
+                                        threat_color = "#FFD700" 
                                     else:
-                                        threat_color = "#00E5FF" # Cyan (Far)
+                                        threat_color = "#00E5FF" 
                                     
-                                    # Append new blip dictionary
+                                    # Added raw_dist to pass actual numbers to the HUD
                                     self.blips.append({
+                                        "angle": angle,
+                                        "raw_dist": distance,
+                                        "dist_px": scaled_dist,
                                         "x": target_x, 
                                         "y": target_y, 
                                         "size": 8.0, 
-                                        "color": threat_color
+                                        "color": threat_color,
+                                        "ripple_radius": 0.0
                                     })
             except Exception:
                 pass
