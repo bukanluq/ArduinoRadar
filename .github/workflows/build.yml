@@ -10,27 +10,28 @@ jobs:
     name: Build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false # If one OS fails, don't cancel the other OS builds
       matrix:
         include:
           # Windows x64
           - os: windows-latest
-            artifact_name: Serial Translator-Windows
-            build_command: pyinstaller --noconsole --onefile --name Serial2Keyboard main.py
+            artifact_name: SerialTranslator-Windows
+            build_command: pyinstaller --noconsole --onefile --collect-all customtkinter --name SerialTranslator main.py
             
           # macOS Apple Silicon (M1/M2/M3)
           - os: macos-latest
-            artifact_name: Serial Translator-macOS-AppleSilicon
-            build_command: pyinstaller --noconsole --onefile --name Serial2Keyboard main.py
+            artifact_name: SerialTranslator-macOS-AppleSilicon
+            build_command: pyinstaller --noconsole --onefile --collect-all customtkinter --name SerialTranslator main.py
             
-          # macOS Intel
-          - os: macos-15-intel
-            artifact_name: Serial2Keyboard-macOS-Intel
-            build_command: pyinstaller --noconsole --onefile --name Serial2Keyboard main.py
+          # macOS Intel (Fixed OS Label)
+          - os: macos-13
+            artifact_name: SerialTranslator-macOS-Intel
+            build_command: pyinstaller --noconsole --onefile --collect-all customtkinter --name SerialTranslator main.py
             
           # Linux x64 (Ubuntu)
           - os: ubuntu-latest
-            artifact_name: Serial Translator-Linux-x64
-            build_command: pyinstaller --noconsole --onefile --name Serial2Keyboard main.py
+            artifact_name: SerialTranslator-Linux-x64
+            build_command: pyinstaller --noconsole --onefile --collect-all customtkinter --name SerialTranslator main.py
 
     steps:
     - name: Checkout Code
@@ -50,6 +51,7 @@ jobs:
     - name: Install Python Dependencies
       run: |
         python -m pip install --upgrade pip
+        pip install pyinstaller # Explicitly install PyInstaller
         pip install -r requirements.txt
 
     - name: Build Executable with PyInstaller
@@ -61,4 +63,5 @@ jobs:
         name: ${{ matrix.artifact_name }}
         path: |
           dist/*.exe
-          dist/Serial2Keyboard*
+          dist/SerialTranslator
+          dist/SerialTranslator.app
