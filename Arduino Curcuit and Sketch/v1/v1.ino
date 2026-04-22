@@ -87,6 +87,13 @@ void loop() {
   }
   radarServo.write(currentAngle);
 
+  // ==========================================
+  // FIX APPLIED HERE
+  // Give the servo 30ms to physically reach the angle and stop vibrating.
+  // This prevents the ultrasonic sound wave from smearing across the room.
+  // ==========================================
+  delay(30); 
+
   // --- 3. SENSOR READING ---
   int distance = getDistance();
 
