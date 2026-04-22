@@ -24,7 +24,7 @@ jobs:
             build_command: pyinstaller --noconsole --onefile --collect-all customtkinter --name SerialTranslator main.py
             
           # macOS Intel (Fixed OS Label)
-          - os: macos-13
+          - os: macos-15-intel
             artifact_name: SerialTranslator-macOS-Intel
             build_command: pyinstaller --noconsole --onefile --collect-all customtkinter --name SerialTranslator main.py
             
