@@ -12,15 +12,20 @@ from datetime import datetime
 from pynput.keyboard import Controller as KeyboardController, Key
 from pynput.mouse import Controller as MouseController, Button as MouseButton
 
-# --- Special Keys & Actions for Keyboard Mapper ---
+# --- Action Mappings ---
 SPECIAL_KEYS = {
     "Space": Key.space, "Ctrl": Key.ctrl_l, "Shift": Key.shift,
     "Enter": Key.enter, "Esc": Key.esc, "Alt": Key.alt_l, "Tab": Key.tab,
     "Up Arrow": Key.up, "Down Arrow": Key.down, "Left Arrow": Key.left, "Right Arrow": Key.right
 }
-MOUSE_ACTIONS = ["Mouse L-Click", "Mouse R-Click", "Mouse M-Click", "Mouse Up", "Mouse Down", "Mouse Left", "Mouse Right"]
-STANDARD_KEYS = [chr(i) for i in range(97, 123)] + [str(i) for i in range(10)]
-ALL_ACTIONS = list(SPECIAL_KEYS.keys()) + MOUSE_ACTIONS + STANDARD_KEYS
+MOUSE_BTN_MAP = {
+    "Mouse L-Click": MouseButton.left, 
+    "Mouse R-Click": MouseButton.right, 
+    "Mouse M-Click": MouseButton.middle
+}
+MOUSE_MOVE_ACTIONS = ["Mouse Up", "Mouse Down", "Mouse Left", "Mouse Right"]
+
+ALL_ACTIONS = list(SPECIAL_KEYS.keys()) + list(MOUSE_BTN_MAP.keys()) + MOUSE_MOVE_ACTIONS + [chr(i) for i in range(97, 123)] + [str(i) for i in range(10)]
 SERIAL_CHARS = [chr(i) for i in range(65, 91)] + [str(i) for i in range(10)] 
 
 # --- Global UI Configuration ---
@@ -32,13 +37,41 @@ def get_available_ports():
     return [port.device for port in ports] if ports else ["No Ports Found"]
 
 
-class KeyboardMapperFrame(ctk.CTkFrame):
+class BaseSerialTool(ctk.CTkFrame):
+    """Shared base class to handle logging, statuses, and common serial thread ops."""
     def __init__(self, master):
         super().__init__(master, fg_color="transparent")
         self.is_running = False
         self.serial_conn = None
-        self.last_data = 'I'
         self.thread = None
+
+    def add_log(self, message, is_warning=False):
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.log_textbox.configure(state="normal")
+        if is_warning:
+            self.log_textbox.insert("end", f"[{timestamp}] [!] {message}\n", "warning")
+            self.log_textbox.tag_config("warning", foreground="#FF3333")
+        else:
+            self.log_textbox.insert("end", f"[{timestamp}] {message}\n")
+        self.log_textbox.see("end")
+        self.log_textbox.configure(state="disabled")
+
+    def update_connection_status(self, color, status, log_msg=None, is_warning=False):
+        self.status_dot.configure(text_color=color)
+        self.status_label.configure(text=status)
+        if log_msg:
+            self.add_log(log_msg, is_warning)
+
+    def close_serial(self):
+        self.is_running = False
+        if self.serial_conn and self.serial_conn.is_open:
+            self.serial_conn.close()
+
+
+class KeyboardMapperFrame(BaseSerialTool):
+    def __init__(self, master):
+        super().__init__(master)
+        self.last_data = 'I'
         self.mouse_speed = 8 
         self.key_map = {'W': 'w', 'S': 's', 'A': 'a', 'D': 'd', 'Z': 'Space'}
         self.keyboard = KeyboardController()
@@ -73,31 +106,50 @@ class KeyboardMapperFrame(ctk.CTkFrame):
         self.middle_frame.grid_columnconfigure(1, weight=1)
         self.middle_frame.grid_rowconfigure(0, weight=1)
 
-        # Left Panel: Config
+        # LEFT PANEL: Config Layout
         self.config_frame = ctk.CTkFrame(self.middle_frame, corner_radius=10, border_width=2, border_color="#1E1E1E")
         self.config_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
         
-        ctk.CTkLabel(self.config_frame, text="Create New Binding", font=("Segoe UI", 18, "bold")).pack(pady=(20, 10))
-        form_frame = ctk.CTkFrame(self.config_frame, fg_color="transparent")
+        self.config_inner = ctk.CTkFrame(self.config_frame, fg_color="transparent")
+        self.config_inner.pack(expand=True, fill="both", padx=20, pady=20)
+
+        # Card 1: New Binding 
+        self.bind_card = ctk.CTkFrame(self.config_inner, fg_color=("gray85", "gray12"), corner_radius=8)
+        self.bind_card.pack(fill="x", pady=(0, 15), ipadx=10, ipady=15)
+        ctk.CTkLabel(self.bind_card, text="Create New Binding", font=("Segoe UI", 16, "bold")).pack(pady=(5, 10))
+        
+        form_frame = ctk.CTkFrame(self.bind_card, fg_color="transparent")
         form_frame.pack(pady=5)
-        ctk.CTkLabel(form_frame, text="Serial Input:").grid(row=0, column=0, padx=10, pady=5)
+        ctk.CTkLabel(form_frame, text="Serial Input:").grid(row=0, column=0, padx=10, pady=5, sticky="e")
         self.add_serial_var = ctk.StringVar(value="W")
-        ctk.CTkOptionMenu(form_frame, variable=self.add_serial_var, values=SERIAL_CHARS, width=80).grid(row=0, column=1, padx=10, pady=5)
-        ctk.CTkLabel(form_frame, text="Emulates Key:").grid(row=1, column=0, padx=10, pady=5)
+        ctk.CTkOptionMenu(form_frame, variable=self.add_serial_var, values=SERIAL_CHARS, width=90).grid(row=0, column=1, padx=10, pady=5)
+        
+        ctk.CTkLabel(form_frame, text="Emulates Key:").grid(row=1, column=0, padx=10, pady=5, sticky="e")
         self.add_action_var = ctk.StringVar(value="Mouse Up")
         ctk.CTkOptionMenu(form_frame, variable=self.add_action_var, values=ALL_ACTIONS, width=140).grid(row=1, column=1, padx=10, pady=5)
         
-        ctk.CTkButton(self.config_frame, text="+ Add Binding", command=self.add_mapping, width=200).pack(pady=15)
-        self.error_label = ctk.CTkLabel(self.config_frame, text="", text_color="#FF5252", font=("Segoe UI", 12, "bold"))
+        ctk.CTkButton(self.bind_card, text="+ Add Binding", command=self.add_mapping, width=200).pack(pady=(15, 5))
+        self.error_label = ctk.CTkLabel(self.bind_card, text="", text_color="#FF5252", font=("Segoe UI", 12, "bold"))
         self.error_label.pack()
 
-        ctk.CTkLabel(self.config_frame, text="Profile Management", font=("Segoe UI", 14, "bold")).pack(pady=(20, 5))
-        prof_btn_frame = ctk.CTkFrame(self.config_frame, fg_color="transparent")
+        # Card 2: Profile Management
+        self.prof_card = ctk.CTkFrame(self.config_inner, fg_color=("gray85", "gray12"), corner_radius=8)
+        self.prof_card.pack(fill="x", pady=15, ipadx=10, ipady=15)
+        ctk.CTkLabel(self.prof_card, text="Profile Storage", font=("Segoe UI", 16, "bold")).pack(pady=(5, 5))
+        ctk.CTkLabel(self.prof_card, text="Save or load your key configurations.", text_color="gray", font=("Segoe UI", 11)).pack(pady=(0, 10))
+        
+        prof_btn_frame = ctk.CTkFrame(self.prof_card, fg_color="transparent")
         prof_btn_frame.pack(pady=5)
-        ctk.CTkButton(prof_btn_frame, text="💾 Save", width=90, fg_color="#333333", hover_color="#555555", command=self.save_profile).pack(side="left", padx=5)
-        ctk.CTkButton(prof_btn_frame, text="📂 Load", width=90, fg_color="#333333", hover_color="#555555", command=self.load_profile).pack(side="left", padx=5)
+        ctk.CTkButton(prof_btn_frame, text="💾 Save", width=100, fg_color="#333333", hover_color="#555555", command=self.save_profile).pack(side="left", padx=5)
+        ctk.CTkButton(prof_btn_frame, text="📂 Load", width=100, fg_color="#333333", hover_color="#555555", command=self.load_profile).pack(side="left", padx=5)
 
-        # Right Panel: Active List
+        # Card 3: Setup Tip
+        self.tip_frame = ctk.CTkFrame(self.config_inner, fg_color="transparent")
+        self.tip_frame.pack(fill="x", side="bottom", pady=(15, 0))
+        tip_text = "💡 Setup Tip: Ensure your Arduino code uses\nSerial.println() so each action is sent cleanly."
+        ctk.CTkLabel(self.tip_frame, text=tip_text, font=("Segoe UI", 11, "italic"), text_color="#666666", justify="center").pack()
+
+        # RIGHT PANEL: Active List
         self.list_frame = ctk.CTkFrame(self.middle_frame, corner_radius=10, border_width=2, border_color="#1E1E1E")
         self.list_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
         ctk.CTkLabel(self.list_frame, text="Active Bindings", font=("Segoe UI", 18, "bold")).pack(pady=(20, 10))
@@ -153,7 +205,8 @@ class KeyboardMapperFrame(ctk.CTkFrame):
             self.refresh_mapping_list()
 
     def refresh_mapping_list(self):
-        for widget in self.scroll_frame.winfo_children(): widget.destroy()
+        for widget in self.scroll_frame.winfo_children(): 
+            widget.destroy()
         for s_char, action in self.key_map.items():
             row = ctk.CTkFrame(self.scroll_frame, corner_radius=8, fg_color=("gray85", "gray16"))
             row.pack(fill="x", pady=5, padx=5)
@@ -162,35 +215,33 @@ class KeyboardMapperFrame(ctk.CTkFrame):
             ctk.CTkLabel(row, text=action, font=("Segoe UI", 14, "bold")).pack(side="left", padx=10)
             ctk.CTkButton(row, text="✕", width=30, height=28, fg_color="transparent", text_color="#FF5252", hover_color="#421010", command=lambda c=s_char: self.delete_mapping(c)).pack(side="right", padx=10)
 
-    # --- Action Execution & Logging ---
-    def add_log(self, message):
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.log_textbox.configure(state="normal")
-        self.log_textbox.insert("end", f"[{timestamp}] {message}\n")
-        self.log_textbox.see("end")
-        self.log_textbox.configure(state="disabled")
+    def trigger_hud(self, s_char, action):
+        """Called safely from main thread to update UI."""
+        self.add_log(f"Triggered: [{s_char}] ➔ {action}")
+        self.hud_frame.configure(border_color="#2ECC71")
+        self.live_input_label.configure(text=f"[{s_char}] ➔ {action}", text_color="#2ECC71")
 
-    def update_hud(self, s_char, action):
-        if s_char and action:
-            self.hud_frame.configure(border_color="#2ECC71")
-            self.live_input_label.configure(text=f"[{s_char}] ➔ {action}", text_color="#2ECC71")
-        else:
-            self.hud_frame.configure(border_color="#1E1E1E")
-            self.live_input_label.configure(text="WAITING...", text_color="gray")
+    def reset_hud(self):
+        """Called safely from main thread to revert UI."""
+        self.hud_frame.configure(border_color="#1E1E1E")
+        self.live_input_label.configure(text="WAITING...", text_color="gray")
 
+    # --- Action Execution ---
     def press_action(self, action):
-        if action in SPECIAL_KEYS: self.keyboard.press(SPECIAL_KEYS[action])
-        elif action == "Mouse L-Click": self.mouse.press(MouseButton.left)
-        elif action == "Mouse R-Click": self.mouse.press(MouseButton.right)
-        elif action == "Mouse M-Click": self.mouse.press(MouseButton.middle)
-        elif action not in MOUSE_ACTIONS: self.keyboard.press(action)
+        if action in SPECIAL_KEYS:
+            self.keyboard.press(SPECIAL_KEYS[action])
+        elif action in MOUSE_BTN_MAP:
+            self.mouse.press(MOUSE_BTN_MAP[action])
+        elif action not in MOUSE_MOVE_ACTIONS:
+            self.keyboard.press(action)
 
     def release_action(self, action):
-        if action in SPECIAL_KEYS: self.keyboard.release(SPECIAL_KEYS[action])
-        elif action == "Mouse L-Click": self.mouse.release(MouseButton.left)
-        elif action == "Mouse R-Click": self.mouse.release(MouseButton.right)
-        elif action == "Mouse M-Click": self.mouse.release(MouseButton.middle)
-        elif action not in MOUSE_ACTIONS: self.keyboard.release(action)
+        if action in SPECIAL_KEYS:
+            self.keyboard.release(SPECIAL_KEYS[action])
+        elif action in MOUSE_BTN_MAP:
+            self.mouse.release(MOUSE_BTN_MAP[action])
+        elif action not in MOUSE_MOVE_ACTIONS:
+            self.keyboard.release(action)
 
     def handle_continuous_mouse(self, action):
         if action == "Mouse Up": self.mouse.move(0, -self.mouse_speed)
@@ -198,14 +249,13 @@ class KeyboardMapperFrame(ctk.CTkFrame):
         elif action == "Mouse Left": self.mouse.move(-self.mouse_speed, 0)
         elif action == "Mouse Right": self.mouse.move(self.mouse_speed, 0)
 
-    # --- Core Serial Loop ---
+    # --- Thread Loop logic ---
     def toggle_listening(self):
         if not self.is_running:
             port = self.port_var.get()
             baud = self.baud_var.get()
             if port in ("Select Port", "No Ports Found"):
-                self.status_dot.configure(text_color="#FF5252")
-                self.status_label.configure(text="Invalid Port")
+                self.update_connection_status("#FF5252", "Invalid Port")
                 return
 
             self.is_running = True
@@ -213,52 +263,50 @@ class KeyboardMapperFrame(ctk.CTkFrame):
             self.port_dropdown.configure(state="disabled")
             self.baud_dropdown.configure(state="disabled")
             self.add_log(f"Attempting connection to {port}...")
+            
             self.thread = threading.Thread(target=self.serial_loop, args=(port, baud), daemon=True)
             self.thread.start()
         else:
             self.stop_listening()
 
     def stop_listening(self):
-        self.is_running = False
+        self.close_serial()
         self.toggle_btn.configure(text="▶ START SYSTEM", fg_color=['#2CC985', '#2FA572'], hover_color=['#0C955A', '#106A43'])
         self.port_dropdown.configure(state="normal", values=get_available_ports())
         self.baud_dropdown.configure(state="normal")
-        self.status_dot.configure(text_color="gray")
-        self.status_label.configure(text="Offline")
-        self.update_hud(None, None)
-        self.add_log("System stopped by user.")
-        if self.last_data in self.key_map: self.release_action(self.key_map[self.last_data])
+        self.update_connection_status("gray", "Offline", "System stopped by user.")
+        self.reset_hud()
+        
+        if self.last_data in self.key_map: 
+            self.release_action(self.key_map[self.last_data])
         self.last_data = 'I'
 
     def serial_loop(self, port, baud):
         try:
             self.serial_conn = serial.Serial(port, int(baud), timeout=0.1) 
-            self.after(0, lambda: self.status_dot.configure(text_color="#2ECC71"))
-            self.after(0, lambda: self.status_label.configure(text=f"Active"))
-            self.after(0, lambda: self.add_log(f"Connected to {port} @ {baud} baud"))
-        except Exception as e:
-            self.after(0, lambda: self.status_dot.configure(text_color="#FF5252"))
-            self.after(0, lambda: self.status_label.configure(text="Error"))
-            self.after(0, lambda: self.add_log(f"ERROR: Could not open {port}."))
+            self.after(0, self.update_connection_status, "#2ECC71", "Active", f"Connected to {port} @ {baud} baud")
+        except Exception:
+            self.after(0, self.update_connection_status, "#FF5252", "Error", f"ERROR: Could not open {port}.", True)
             self.after(0, self.stop_listening)
             return
 
         while self.is_running:
             try:
                 if self.serial_conn.in_waiting > 0:
-                    data = self.serial_conn.readline().decode('utf-8').strip()
+                    data = self.serial_conn.readline().decode('utf-8', errors='ignore').strip()
                     if data:
                         if self.last_data in self.key_map:
                             self.release_action(self.key_map[self.last_data])
+                        
                         if data in self.key_map:
                             mapped_action = self.key_map[data]
                             self.press_action(mapped_action)
                             if data != self.last_data:
-                                self.after(0, lambda d=data, a=mapped_action: self.add_log(f"Triggered: [{d}] ➔ {a}"))
-                                self.after(0, lambda d=data, a=mapped_action: self.update_hud(d, a))
+                                self.after(0, self.trigger_hud, data, mapped_action)
                         else:
                             if data != self.last_data:
-                                self.after(0, lambda: self.update_hud(None, None))
+                                self.after(0, self.reset_hud)
+                                
                         self.last_data = data
 
                 if self.last_data in self.key_map:
@@ -267,16 +315,10 @@ class KeyboardMapperFrame(ctk.CTkFrame):
             except Exception:
                 break
 
-        if self.serial_conn and self.serial_conn.is_open:
-            self.serial_conn.close()
 
-
-class RadarVisualizerFrame(ctk.CTkFrame):
+class RadarVisualizerFrame(BaseSerialTool):
     def __init__(self, master):
-        super().__init__(master, fg_color="transparent")
-        self.is_running = False
-        self.serial_conn = None
-        self.thread = None
+        super().__init__(master)
         self.current_angle = 90
         self.sweep_direction = 1 
         self.max_distance = 100  
@@ -285,7 +327,7 @@ class RadarVisualizerFrame(ctk.CTkFrame):
         self.after(100, self.update_radar_ui)  
 
     def build_ui(self):
-        # 1. TOP TIER: Connection Bar (Identical Layout)
+        # 1. TOP TIER: Connection Bar 
         self.conn_frame = ctk.CTkFrame(self, height=60, corner_radius=10, border_width=2, border_color="#1E1E1E")
         self.conn_frame.pack(fill="x", pady=(0, 10), ipadx=10, ipady=10)
         
@@ -305,7 +347,7 @@ class RadarVisualizerFrame(ctk.CTkFrame):
         self.status_label = ctk.CTkLabel(self.conn_frame, text="Offline", font=("Segoe UI", 13), width=60, anchor="w")
         self.status_label.pack(side="left")
 
-        # Radar Specific Top-Right Controls
+        # Radar Specific Controls
         ctk.CTkLabel(self.conn_frame, text="Max Range:", font=("Segoe UI", 12, "bold")).pack(side="left", padx=(15, 5))
         self.range_var = ctk.IntVar(value=100)
         self.range_slider = ctk.CTkSlider(self.conn_frame, variable=self.range_var, from_=20, to=200, width=120, command=self.update_range)
@@ -322,7 +364,7 @@ class RadarVisualizerFrame(ctk.CTkFrame):
         self.canvas.pack(fill="both", expand=True, padx=5, pady=5)
         self.canvas.bind("<Configure>", self.on_resize)
 
-        # 3. BOTTOM TIER: Console HUD (Identical to Keyboard Mapper)
+        # 3. BOTTOM TIER: Console HUD 
         self.hud_frame = ctk.CTkFrame(self, height=120, corner_radius=10, border_width=2, border_color="#1E1E1E")
         self.hud_frame.pack(fill="x", side="bottom")
         self.hud_frame.pack_propagate(False)
@@ -344,19 +386,6 @@ class RadarVisualizerFrame(ctk.CTkFrame):
         self.add_log("Sonar Ready. Waiting for sweep...")
 
     # --- Radar Logic & Rendering ---
-    def add_log(self, message, is_warning=False):
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.log_textbox.configure(state="normal")
-        # Add warning tags if needed
-        if is_warning:
-            self.log_textbox.insert("end", f"[{timestamp}] [!] {message}\n", "warning")
-            self.log_textbox.tag_config("warning", foreground="#FF3333")
-        else:
-            self.log_textbox.insert("end", f"[{timestamp}] {message}\n")
-        
-        self.log_textbox.see("end")
-        self.log_textbox.configure(state="disabled")
-
     def update_range(self, val):
         self.max_distance = int(val)
         self.range_val_label.configure(text=f"{self.max_distance} cm")
@@ -421,7 +450,7 @@ class RadarVisualizerFrame(ctk.CTkFrame):
                         self.canvas.create_oval(x - ripple, y - ripple, x + ripple, y + ripple, outline=color, width=1, tags="dynamic")
                         blip["ripple_radius"] += 4 
                     
-                    blip["size"] -= 0.15 # Slowed fade for better persistence
+                    blip["size"] -= 0.15 
                     alive_blips.append(blip)
 
             self.blips = alive_blips
@@ -440,13 +469,16 @@ class RadarVisualizerFrame(ctk.CTkFrame):
 
         self.after(30, self.update_radar_ui)
 
+    def trigger_radar_log(self, dist, angle, is_critical):
+        self.add_log(f"New Contact locked at {dist}cm ({angle}°)", is_critical)
+
+    # --- Thread Loop logic ---
     def toggle_listening(self):
         if not self.is_running:
             port = self.port_var.get()
             baud = self.baud_var.get()
             if port in ("Select Port", "No Ports Found"):
-                self.status_dot.configure(text_color="#FF5252")
-                self.status_label.configure(text="Invalid Port")
+                self.update_connection_status("#FF5252", "Invalid Port")
                 return
 
             self.is_running = True
@@ -456,35 +488,31 @@ class RadarVisualizerFrame(ctk.CTkFrame):
             self.range_slider.configure(state="disabled") 
             self.blips = [] 
             self.add_log(f"Initializing sweep on {port}...")
+            
             self.thread = threading.Thread(target=self.serial_loop, args=(port, baud), daemon=True)
             self.thread.start()
         else:
             self.stop_listening()
 
     def stop_listening(self):
-        self.is_running = False
+        self.close_serial()
         self.toggle_btn.configure(text="▶ START SYSTEM", fg_color=['#2CC985', '#2FA572'], hover_color=['#0C955A', '#106A43'])
         self.port_dropdown.configure(state="normal", values=get_available_ports())
         self.baud_dropdown.configure(state="normal")
         self.range_slider.configure(state="normal")
-        self.status_dot.configure(text_color="gray")
-        self.status_label.configure(text="Offline")
+        
+        self.update_connection_status("gray", "Offline", "System stopped manually.")
         self.closest_tgt_lbl.configure(text="OFFLINE", text_color="gray")
         self.tgt_count_lbl.configure(text="Tracking: --")
         self.hud_frame.configure(border_color="#1E1E1E")
         self.canvas_frame.configure(border_color="#1E1E1E")
-        self.add_log("System stopped manually.")
 
     def serial_loop(self, port, baud):
         try:
             self.serial_conn = serial.Serial(port, int(baud), timeout=0.1) 
-            self.after(0, lambda: self.status_dot.configure(text_color="#2ECC71"))
-            self.after(0, lambda: self.status_label.configure(text="Active"))
-            self.after(0, lambda: self.add_log(f"Connection Established @ {baud} baud"))
+            self.after(0, self.update_connection_status, "#2ECC71", "Active", f"Connection Established @ {baud} baud")
         except Exception:
-            self.after(0, lambda: self.status_dot.configure(text_color="#FF5252"))
-            self.after(0, lambda: self.status_label.configure(text="Error"))
-            self.after(0, lambda: self.add_log(f"FATAL: Could not access {port}", True))
+            self.after(0, self.update_connection_status, "#FF5252", "Error", f"FATAL: Could not access {port}", True)
             self.after(0, self.stop_listening)
             return
 
@@ -519,22 +547,18 @@ class RadarVisualizerFrame(ctk.CTkFrame):
                                     for blip in self.blips:
                                         if abs(blip["angle"] - angle) <= 5 and abs(blip["raw_dist"] - distance) <= 5:
                                             blip.update({"angle": angle, "raw_dist": distance, "dist_px": scaled_dist, "x": target_x, "y": target_y, "size": 8.0, "color": threat_color})
-                                            if blip["ripple_radius"] > 30: blip["ripple_radius"] = 0.0 
+                                            if blip["ripple_radius"] > 30: 
+                                                blip["ripple_radius"] = 0.0 
                                             is_new_target = False
                                             break
 
                                     if is_new_target:
                                         self.blips.append({"angle": angle, "raw_dist": distance, "dist_px": scaled_dist, "x": target_x, "y": target_y, "size": 8.0, "color": threat_color, "ripple_radius": 0.0})
-                                        # Log new valid targets
-                                        log_msg = f"New Contact locked at {distance}cm ({angle}°)"
-                                        self.after(0, lambda m=log_msg, crit=(dist_pct < 0.33): self.add_log(m, crit))
+                                        self.after(0, self.trigger_radar_log, distance, angle, dist_pct < 0.33)
 
             except Exception:
                 pass
             time.sleep(0.01)
-
-        if self.serial_conn and self.serial_conn.is_open:
-            self.serial_conn.close()
 
 
 class SerialTranslatorApp(ctk.CTk):
@@ -567,16 +591,19 @@ class SerialTranslatorApp(ctk.CTk):
         self.active_frame.pack(fill="both", expand=True)
 
     def switch_view(self, view_name):
-        if self.active_frame.is_running: self.active_frame.stop_listening()
+        if self.active_frame.is_running: 
+            self.active_frame.stop_listening()
         self.active_frame.pack_forget()
         self.active_frame = self.frames[view_name]
         self.active_frame.pack(fill="both", expand=True)
 
     def on_closing(self):
         for frame in self.frames.values():
-            if frame.is_running: frame.stop_listening()
+            if frame.is_running: 
+                frame.stop_listening()
         self.destroy()
         sys.exit()
+
 
 if __name__ == "__main__":
     app = SerialTranslatorApp()
