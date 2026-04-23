@@ -564,7 +564,7 @@ class RadarVisualizerFrame(BaseSerialTool):
 class SerialTranslatorApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Serial Translator | E21 Academy")
+        self.title("Serial Translator")
         self.geometry("1000x750")
         self.minsize(950, 700)
 
@@ -572,7 +572,7 @@ class SerialTranslatorApp(ctk.CTk):
         self.header_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.header_frame.pack(fill="x", padx=20, pady=(20, 10))
         ctk.CTkLabel(self.header_frame, text="Serial Translator", font=("Segoe UI", 28, "bold")).pack(side="left")
-        ctk.CTkLabel(self.header_frame, text="by E21 Academy", font=("Segoe UI", 14), text_color="gray").pack(side="left", padx=(10, 0), pady=(10, 0))
+        ctk.CTkLabel(self.header_frame, text="by GitHub", font=("Segoe UI", 14), text_color="gray").pack(side="left", padx=(10, 0), pady=(10, 0))
 
         # Navigation
         self.current_view = ctk.StringVar(value="⌨️ Keyboard Mapper")
