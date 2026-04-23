@@ -131,7 +131,9 @@ The radar canvas redraws dynamically. Resize and release the window to refresh p
 
 ## 📷 Preview
 
-<img width="1366" height="721" alt="Radar Preview" src="https://github.com/user-attachments/assets/104a8622-9ff7-41e1-9a2d-75f4a1f98fa3" />
+<img width="1366" height="721" alt="image" src="https://github.com/user-attachments/assets/a98cca42-4e56-4780-9a3f-87c9dd157e93" />
+<img width="1366" height="721" alt="image" src="https://github.com/user-attachments/assets/dab1de33-6d3e-4d17-b39c-9455d3ec29b9" />
+
 
 ---
 
